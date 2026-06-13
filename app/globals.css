@@ -1,26 +1,53 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
+  --color-brand-orange: #E8650A;
+  --color-brand-orange-light: #F5A05C;
+  --color-brand-green: #1B7A3F;
+  --color-brand-green-light: #2EA55A;
+  --color-brand-black: #0A0A0A;
+  --color-brand-surface: #1C1C1E;
+  --color-brand-border: #3A3A3C;
+  --color-brand-muted: #8E8E93;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --background: #0A0A0A;
+  --foreground: #FFFFFF;
+
+  --card: #1C1C1E;
+  --card-foreground: #FFFFFF;
+  --popover: #1C1C1E;
+  --popover-foreground: #FFFFFF;
+  --primary: #E8650A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1B7A3F;
+  --secondary-foreground: #FFFFFF;
+  --muted: #1C1C1E;
+  --muted-foreground: #8E8E93;
+  --accent: #1C1C1E;
+  --accent-foreground: #FFFFFF;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: #3A3A3C;
+  --input: #3A3A3C;
+  --ring: #E8650A;
+  --radius: 0.5rem;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Inter, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  border-color: var(--border);
+  box-sizing: border-box;
 }
