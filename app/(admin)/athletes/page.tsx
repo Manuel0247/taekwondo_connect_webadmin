@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
-import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
 import { GradeChip } from "@/components/admin/GradeChip";
 import { EmptyState } from "@/components/admin/EmptyState";
@@ -22,6 +21,22 @@ interface Athlete {
   sexe?: string;
 }
 
+// API returns athlete with nested user: { nom, prenom, email, ... }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalize(raw: any): Athlete {
+  const u = raw.user ?? {};
+  return {
+    id:              raw.id,
+    prenom:          raw.prenom          ?? u.prenom          ?? "",
+    nom:             raw.nom             ?? u.nom             ?? "",
+    email:           raw.email           ?? u.email           ?? "",
+    grade:           raw.grade           ?? undefined,
+    club:            raw.club            ?? undefined,
+    date_naissance:  raw.date_naissance  ?? u.date_naissance  ?? undefined,
+    sexe:            raw.sexe            ?? u.sexe            ?? undefined,
+  };
+}
+
 export default function AthletesPage() {
   const [search, setSearch] = useState("");
 
@@ -29,7 +44,8 @@ export default function AthletesPage() {
     queryKey: ["admin-athletes"],
     queryFn: async () => {
       const res = await api.get("/admin/athletes");
-      return res.data.data;
+      const raw = res.data.data ?? [];
+      return Array.isArray(raw) ? raw.map(normalize) : [];
     },
   });
 
@@ -79,7 +95,7 @@ export default function AthletesPage() {
                     <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Email</th>
                     <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Club</th>
                     <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Grade</th>
-                    <th className="px-5 py-3" />
+                    <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Naissance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -102,13 +118,10 @@ export default function AthletesPage() {
                           <span className="text-brand-muted text-sm">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-3">
-                        <Link
-                          href={`/athletes/${athlete.id}`}
-                          className="text-brand-orange hover:text-brand-orange-light text-xs font-medium transition-colors"
-                        >
-                          Voir
-                        </Link>
+                      <td className="px-5 py-3 text-brand-muted text-sm">
+                        {athlete.date_naissance
+                          ? new Date(athlete.date_naissance).toLocaleDateString("fr-FR")
+                          : "—"}
                       </td>
                     </tr>
                   ))}

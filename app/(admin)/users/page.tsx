@@ -13,7 +13,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 
-interface User { id: string; prenom: string; nom: string; email: string; role: "admin" | "maitre_salle" | "athlete"; created_at: string; }
+interface SpatiRole { name: string }
+interface User {
+  id: string; prenom: string; nom: string; email: string;
+  role?: string;          // set via setAttribute in AuthService
+  roles?: SpatiRole[];    // Spatie permission eager-loaded array
+  created_at: string;
+}
 
 const roleConfig: Record<string, { label: string; className: string }> = {
   admin: { label: "Admin", className: "bg-brand-orange/15 text-brand-orange border-brand-orange/30" },
@@ -28,7 +34,14 @@ export default function UsersPage() {
 
   const { data: users, isLoading } = useQuery<User[]>({
     queryKey: ["users"],
-    queryFn: async () => (await api.get("/users")).data.data,
+    queryFn: async () => {
+      const list: User[] = (await api.get("/users")).data.data ?? [];
+      // Normalize: role may be a direct string OR nested in roles[0].name (Spatie)
+      return list.map((u) => ({
+        ...u,
+        role: u.role ?? u.roles?.[0]?.name ?? "",
+      }));
+    },
   });
 
   const deleteMutation = useMutation({
@@ -70,7 +83,8 @@ export default function UsersPage() {
                 </thead>
                 <tbody>
                   {filtered.map((u) => {
-                    const r = roleConfig[u.role] ?? { label: u.role, className: "bg-gray-500/15 text-gray-400 border-gray-500/30" };
+                    const role = u.role ?? "";
+                    const r = roleConfig[role] ?? { label: role || "—", className: "bg-gray-500/15 text-gray-400 border-gray-500/30" };
                     return (
                       <tr key={u.id} className="border-b border-brand-border/50 hover:bg-white/2">
                         <td className="px-5 py-3">
@@ -89,7 +103,7 @@ export default function UsersPage() {
                           {u.created_at ? new Date(u.created_at).toLocaleDateString("fr-FR") : "—"}
                         </td>
                         <td className="px-5 py-3">
-                          {u.role !== "admin" && (
+                          {role !== "admin" && (
                             <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(u)}
                               className="text-brand-muted hover:text-red-400 h-7 w-7 p-0">
                               <Trash2 className="size-3.5" />

@@ -35,8 +35,17 @@ interface Club {
   id: string;
   nom: string;
   ville: string;
-  maitre_salle?: { nom: string; prenom: string };
+  maitre_salle?: { nom: string; prenom: string } | null;
   statut: "en_attente" | "valide" | "suspendu" | "refuse";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePendingClub(raw: any): Club {
+  const m = raw.maitre_salle ?? raw.user ?? raw.owner ?? raw.responsable ?? null;
+  return {
+    ...raw,
+    maitre_salle: m ? { prenom: m.prenom ?? "", nom: m.nom ?? "" } : null,
+  };
 }
 
 interface ActivityItem {
@@ -56,13 +65,14 @@ export default function DashboardPage() {
     queryKey: ["dashboard-stats"],
     queryFn: async () => {
       const res = await api.get("/admin/dashboard");
+      // Response: { vue_globale: {clubs, athletes, evenements, cours}, clubs:{total,...}, ... }
       const d = res.data.data ?? {};
-      // Normalize field names — API may use short or prefixed forms
+      const vg = d.vue_globale ?? {};
       return {
-        total_clubs:   d.total_clubs   ?? d.clubs   ?? 0,
-        total_users:   d.total_users   ?? d.users   ?? d.athletes ?? 0,
-        total_events:  d.total_events  ?? d.events  ?? 0,
-        total_courses: d.total_courses ?? d.courses ?? 0,
+        total_clubs:   vg.clubs      ?? d.clubs?.total      ?? 0,
+        total_users:   vg.athletes   ?? d.athletes?.total   ?? 0,
+        total_events:  vg.evenements ?? d.evenements?.total ?? 0,
+        total_courses: vg.cours      ?? d.cours?.total      ?? 0,
       };
     },
   });
@@ -71,8 +81,9 @@ export default function DashboardPage() {
     queryKey: ["pending-clubs"],
     queryFn: async () => {
       const res = await api.get("/clubs/pending");
-      const d = res.data.data;
-      return Array.isArray(d) ? d : (d?.clubs ?? d?.data ?? []);
+      // ApiResponse::paginate puts items directly in data[]
+      const list = Array.isArray(res.data.data) ? res.data.data : [];
+      return list.map(normalizePendingClub);
     },
   });
 
@@ -80,9 +91,13 @@ export default function DashboardPage() {
     queryKey: ["dashboard-activity"],
     queryFn: async () => {
       const res = await api.get("/admin/dashboard/activite");
+      // Response: { j1: {inscriptions, evenements, reservations}, j30: {...}, j90: {...} }
       const d = res.data.data ?? {};
-      // Try several possible keys
-      return d.inscriptions_par_mois ?? d.activite ?? d.inscriptions ?? [];
+      return [
+        { mois: "J-1",  inscriptions: d.j1?.inscriptions  ?? 0 },
+        { mois: "J-30", inscriptions: d.j30?.inscriptions ?? 0 },
+        { mois: "J-90", inscriptions: d.j90?.inscriptions ?? 0 },
+      ];
     },
   });
 
@@ -90,8 +105,10 @@ export default function DashboardPage() {
     queryKey: ["dashboard-athletes"],
     queryFn: async () => {
       const res = await api.get("/admin/dashboard/athletes");
+      // Response: { total, valides, en_attente, par_grade: [{grade, total}] }
       const d = res.data.data ?? {};
-      return d.repartition_grades ?? d.grades ?? d.par_grade ?? [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (d.par_grade ?? []).map((g: any) => ({ grade: g.grade, count: g.total ?? g.count ?? 0 }));
     },
   });
 

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, PauseCircle, Search, Filter } from "lucide-react";
+import { CheckCircle2, XCircle, PauseCircle, Search, Filter, Eye } from "lucide-react";
+import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
 import { ClubStatusBadge } from "@/components/admin/ClubStatusBadge";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
@@ -25,9 +26,23 @@ interface Club {
   id: string;
   nom: string;
   ville: string;
-  maitre_salle?: { nom: string; prenom: string };
+  maitre_salle?: { nom: string; prenom: string } | null;
   nb_athletes?: number;
+  athletes_count?: number;
   statut: "en_attente" | "valide" | "suspendu" | "refuse";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeClub(raw: any): Club {
+  // Maitre may be in raw.maitre_salle, raw.user, raw.owner, raw.responsable
+  const m = raw.maitre_salle ?? raw.user ?? raw.owner ?? raw.responsable ?? null;
+  return {
+    ...raw,
+    maitre_salle: m
+      ? { prenom: m.prenom ?? "", nom: m.nom ?? "" }
+      : null,
+    nb_athletes: raw.nb_athletes ?? raw.athletes_count ?? raw.total_athletes ?? 0,
+  };
 }
 
 type ActionType = "validate" | "reject" | "suspend" | null;
@@ -43,8 +58,19 @@ export default function ClubsPage() {
   const { data: clubs, isLoading } = useQuery<Club[]>({
     queryKey: ["clubs"],
     queryFn: async () => {
-      const res = await api.get("/clubs");
-      return res.data.data;
+      // /clubs returns only validated clubs; /clubs/pending returns pending ones.
+      // Merge both to show all clubs in the admin table.
+      const [valRes, penRes] = await Promise.all([
+        api.get("/clubs").catch(() => ({ data: { data: [] } })),
+        api.get("/clubs/pending").catch(() => ({ data: { data: [] } })),
+      ]);
+      const validated = Array.isArray(valRes.data.data) ? valRes.data.data : [];
+      const pending   = Array.isArray(penRes.data.data) ? penRes.data.data : [];
+      // Deduplicate by id (in case a club appears in both)
+      const seen = new Set<string>();
+      return [...validated, ...pending]
+        .filter((c) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; })
+        .map(normalizeClub);
     },
   });
 
@@ -154,6 +180,12 @@ export default function ClubsPage() {
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-1.5 justify-end">
+                          <Link href={`/clubs/${club.id}`}>
+                            <Button size="sm" variant="ghost"
+                              className="text-brand-muted hover:text-white h-7 px-2.5 text-xs">
+                              <Eye className="size-3 mr-1" />Voir
+                            </Button>
+                          </Link>
                           {club.statut === "en_attente" && (
                             <>
                               <Button size="sm" onClick={() => openAction(club, "validate")}

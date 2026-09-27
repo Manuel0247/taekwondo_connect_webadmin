@@ -13,7 +13,19 @@ export default function AthleteDetailPage({ params }: { params: Promise<{ id: st
   const { id } = use(params);
   const { data: athlete, isLoading } = useQuery({
     queryKey: ["athlete", id],
-    queryFn: async () => (await api.get(`/athletes/${id}`)).data.data,
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw: any = (await api.get(`/athletes/${id}`)).data.data;
+      const u = raw?.user ?? {};
+      return {
+        ...raw,
+        prenom:         raw.prenom         ?? u.prenom         ?? "",
+        nom:            raw.nom            ?? u.nom            ?? "",
+        email:          raw.email          ?? u.email          ?? "",
+        date_naissance: raw.date_naissance ?? u.date_naissance ?? null,
+        sexe:           raw.sexe           ?? u.sexe           ?? null,
+      };
+    },
   });
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -27,7 +39,7 @@ export default function AthleteDetailPage({ params }: { params: Promise<{ id: st
           <div className="space-y-5">
             <div className="bg-brand-surface rounded-xl border border-brand-border p-6 flex items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-brand-orange/20 flex items-center justify-center text-brand-orange text-xl font-bold">
-                {athlete.prenom[0]}{athlete.nom[0]}
+                {(athlete.prenom || "?")[0]}{(athlete.nom || "?")[0]}
               </div>
               <div>
                 <h2 className="text-white text-xl font-bold">{athlete.prenom} {athlete.nom}</h2>
