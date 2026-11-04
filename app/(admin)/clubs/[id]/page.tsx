@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
+import { mediaUrl } from "@/lib/media";
 
 type ActionType = "validate" | "reject" | "suspend" | null;
 
@@ -90,7 +91,7 @@ export default function ClubDetailPage({ params }: { params: Promise<{ id: strin
                 {/* Logo */}
                 {club.logo_url ? (
                   <img
-                    src={club.logo_url}
+                    src={mediaUrl(club.logo_url)}
                     alt={club.nom}
                     className="w-20 h-20 rounded-xl object-cover border border-brand-border shrink-0"
                   />
@@ -254,9 +255,9 @@ export default function ClubDetailPage({ params }: { params: Promise<{ id: strin
               <Section icon={ImageIcon} title={`Photos (${club.photos_urls.length})`}>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {club.photos_urls.map((url: string, i: number) => (
-                    <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                    <a key={i} href={mediaUrl(url)} target="_blank" rel="noopener noreferrer">
                       <img
-                        src={url}
+                        src={mediaUrl(url)}
                         alt={`Photo ${i + 1}`}
                         className="w-full aspect-square object-cover rounded-lg border border-brand-border hover:opacity-80 transition-opacity"
                       />
@@ -275,7 +276,7 @@ export default function ClubDetailPage({ params }: { params: Promise<{ id: strin
                     return (
                       <a
                         key={i}
-                        href={url}
+                        href={mediaUrl(url)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-3 bg-brand-black rounded-lg px-4 py-2.5 hover:bg-white/5 transition-colors"

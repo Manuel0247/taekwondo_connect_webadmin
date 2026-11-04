@@ -4,7 +4,7 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Pencil, Trash2, Loader2, Video, UploadCloud, Play, X, Link2 } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Loader2, Video, UploadCloud, Play, X, Link2, ImagePlus } from "lucide-react";
 import { TopBar } from "@/components/admin/TopBar";
 import { EmptyState } from "@/components/admin/EmptyState";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
@@ -19,10 +19,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
+import { mediaUrl } from "@/lib/media";
 
 const schema = z.object({
   nom_fr:     z.string().min(1),
   nom_korean: z.string().optional(),
+  description: z.string().optional(),
   discipline: z.enum(["taekwondo_sport", "taekwondo_traditionnel", "poomsae", "self_defense"]),
   niveau:     z.enum(["debutant", "intermediaire", "avance"]),
   type:       z.enum(["coup_de_pied", "coup_de_poing", "blocage", "deplacement", "poomsae"]),
@@ -33,6 +35,7 @@ interface Technique {
   id: string;
   nom_fr: string;
   nom_korean?: string;
+  description?: string;
   discipline: string;
   niveau: string;
   type: string;
@@ -47,6 +50,24 @@ const niveauColors: Record<string, string> = {
 };
 
 const ACCEPT_VIDEO = ".mp4,.webm,video/mp4,video/webm";
+
+// L'API renvoie des clés de validation brutes ("validation.uploaded") : on les traduit
+function videoUploadErrorMessage(err: unknown): string {
+  const data = (err as { response?: { status?: number; data?: { error?: { message?: string; details?: Record<string, string[]> } } } })
+    ?.response;
+  if (data?.status === 413) return "Fichier trop volumineux pour le serveur.";
+  if (data?.status === 429) return "Trop d'uploads en peu de temps, réessayez dans une minute.";
+  const detail = data?.data?.error?.details?.file?.[0];
+  switch (detail) {
+    case "validation.uploaded":
+      return "Le serveur PHP a refusé le fichier (limite upload_max_filesize / post_max_size).";
+    case "validation.max.file":
+      return "La vidéo dépasse 200 Mo.";
+    case "validation.mimes":
+      return "Format non supporté : MP4 ou WebM uniquement.";
+  }
+  return data?.data?.error?.message ?? "Le serveur est injoignable.";
+}
 const MAX_SIZE_MB  = 200;
 
 export default function TechniquesPage() {
@@ -67,11 +88,15 @@ export default function TechniquesPage() {
   const [uploadProgress,   setUploadProgress]   = useState(0);
   const [uploading,        setUploading]        = useState(false);
 
+  // Illustration : un seul <input type="file"> caché, ciblé sur la technique cliquée
+  const illustrationInputRef = useRef<HTMLInputElement>(null);
+  const [illustrationTarget, setIllustrationTarget] = useState<Technique | null>(null);
+
   // ─── Query ───────────────────────────────────────────────
   const { data: techniques, isLoading } = useQuery<Technique[]>({
     queryKey: ["techniques"],
     queryFn: async () => {
-      const res = await api.get("/techniques");
+      const res = await api.get("/techniques", { params: { limit: 500 } });
       const data = res.data.data;
       return Array.isArray(data) ? data : [];
     },
@@ -121,6 +146,7 @@ export default function TechniquesPage() {
     setEditTech(t);
     setValue("nom_fr",     t.nom_fr);
     setValue("nom_korean", t.nom_korean ?? "");
+    setValue("description", t.description ?? "");
     setValue("discipline", t.discipline as FormData["discipline"]);
     setValue("niveau",     t.niveau     as FormData["niveau"]);
     setValue("type",       t.type       as FormData["type"]);
@@ -173,11 +199,54 @@ export default function TechniquesPage() {
       toast.success("Vidéo uploadée avec succès");
       queryClient.invalidateQueries({ queryKey: ["techniques"] });
       closeVideoDialog();
-    } catch {
-      toast.error("Erreur lors de l'upload");
+    } catch (err) {
+      toast.error("Erreur lors de l'upload", { description: videoUploadErrorMessage(err) });
     } finally {
       setUploading(false);
     }
+  };
+
+  const illustrationMutation = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => {
+      const formData = new FormData();
+      formData.append("model", "technique");
+      formData.append("model_id", id);
+      formData.append("collection", "illustration");
+      formData.append("file", file);
+      return api.post("/uploads/image", formData, { headers: { "Content-Type": "multipart/form-data" } });
+    },
+    onSuccess: () => {
+      toast.success("Illustration mise à jour");
+      queryClient.invalidateQueries({ queryKey: ["techniques"] });
+    },
+    onError: (err) => {
+      const res = (err as { response?: { status?: number; data?: { error?: { message?: string; details?: Record<string, string[]> } } } })?.response;
+      const detail = res?.data?.error?.details?.file?.[0];
+      const description =
+        detail === "validation.max.file" ? "L'image dépasse 5 Mo."
+        : detail === "validation.mimes" || detail === "validation.image" ? "Format non supporté : JPG, PNG ou WebP."
+        : res?.status === 429 ? "Trop d'uploads en peu de temps, réessayez dans une minute."
+        : res?.data?.error?.message;
+      toast.error("Upload impossible", { description });
+    },
+    onSettled: () => setIllustrationTarget(null),
+  });
+
+  const pickIllustration = (t: Technique) => {
+    setIllustrationTarget(t);
+    illustrationInputRef.current?.click();
+  };
+
+  const onIllustrationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !illustrationTarget) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image trop lourde (max 5 Mo)");
+      setIllustrationTarget(null);
+      return;
+    }
+    illustrationMutation.mutate({ id: illustrationTarget.id, file });
   };
 
   const filtered = (techniques ?? []).filter((t) =>
@@ -214,14 +283,32 @@ export default function TechniquesPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-brand-border">
-                    {["Nom", "Coréen", "Discipline", "Niveau", "Type", "Vidéo", ""].map((h) => (
-                      <th key={h} className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">{h}</th>
+                    {["", "Nom", "Coréen", "Discipline", "Niveau", "Type", "Vidéo", ""].map((h, i) => (
+                      <th key={i} className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((t) => (
                     <tr key={t.id} className="border-b border-brand-border/50 hover:bg-white/2 transition-colors">
+                      <td className="pl-5 py-2 w-16">
+                        <button
+                          type="button"
+                          onClick={() => pickIllustration(t)}
+                          disabled={illustrationMutation.isPending}
+                          title={t.illustration_url ? "Changer l'illustration" : "Ajouter une illustration"}
+                          className="relative size-11 rounded-lg overflow-hidden border border-brand-border bg-brand-black flex items-center justify-center hover:border-brand-orange transition-colors"
+                        >
+                          {illustrationMutation.isPending && illustrationTarget?.id === t.id ? (
+                            <Loader2 className="size-4 animate-spin text-brand-muted" />
+                          ) : t.illustration_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={mediaUrl(t.illustration_url)} alt={t.nom_fr} className="size-full object-cover" />
+                          ) : (
+                            <ImagePlus className="size-4 text-brand-muted" />
+                          )}
+                        </button>
+                      </td>
                       <td className="px-5 py-3 text-white text-sm font-medium">{t.nom_fr}</td>
                       <td className="px-5 py-3 text-brand-muted text-sm italic">{t.nom_korean ?? "—"}</td>
                       <td className="px-5 py-3 text-brand-muted text-sm">{t.discipline.replace(/_/g, " ")}</td>
@@ -270,6 +357,14 @@ export default function TechniquesPage() {
         </div>
       </div>
 
+      <input
+        ref={illustrationInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={onIllustrationChange}
+      />
+
       {/* ── Créer / Modifier ── */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
         <DialogContent className="bg-brand-surface border-brand-border text-white max-w-md">
@@ -290,6 +385,15 @@ export default function TechniquesPage() {
                 )}
               </div>
             ))}
+            <div className="space-y-1.5">
+              <Label className="text-white text-sm">Description</Label>
+              <textarea
+                rows={3}
+                placeholder="Exécution, points clés, erreurs fréquentes…"
+                className="w-full rounded-md border border-brand-border bg-brand-black px-3 py-2 text-sm text-white placeholder:text-brand-muted focus:outline-none focus:ring-2 focus:ring-brand-orange/50"
+                {...register("description")}
+              />
+            </div>
             {[
               { label: "Discipline", name: "discipline", options: [["taekwondo_sport","TKD Sport"],["taekwondo_traditionnel","TKD Traditionnel"],["poomsae","Poomsae"],["self_defense","Self-défense"]] },
               { label: "Niveau",     name: "niveau",     options: [["debutant","Débutant"],["intermediaire","Intermédiaire"],["avance","Avancé"]] },

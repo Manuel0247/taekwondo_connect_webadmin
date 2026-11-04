@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft, Calendar, MapPin, Users, Clock,
-  Mail, Weight, CheckCircle2, XCircle, Loader2, Ban,
+  Mail, Weight, CheckCircle2, XCircle, Loader2, Ban, Pencil,
 } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
@@ -16,11 +16,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CompetitionResults, type Resultat } from "@/components/admin/CompetitionResults";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 
 /* ── Types ── */
-type EventStatus       = "brouillon" | "publie" | "annule";
+type EventStatus       = "brouillon" | "publie" | "annule" | "termine";
 type InscriptionStatus = "propose" | "en_attente" | "confirme" | "refuse" | "annule";
 
 interface Inscription {
@@ -33,6 +34,8 @@ interface Inscription {
   grade:           string | null;
   categorie_poids: string | null;
   numero_licence:  string | null;
+  resultat:        Resultat | null;
+  points:          number | null;
 }
 
 /* ── Config ── */
@@ -40,6 +43,7 @@ const eventStatusConfig: Record<EventStatus, { label: string; className: string 
   brouillon: { label: "Brouillon", className: "bg-gray-500/15 text-gray-400 border-gray-500/30" },
   publie:    { label: "Publié",    className: "bg-brand-green/15 text-brand-green-light border-brand-green/30" },
   annule:    { label: "Annulé",   className: "bg-red-500/15 text-red-400 border-red-500/30" },
+  termine:   { label: "Terminé",  className: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
 };
 
 const inscStatusConfig: Record<InscriptionStatus, { label: string; className: string }> = {
@@ -68,6 +72,8 @@ function normalize(raw: any): Inscription {
     grade:           athlete.grade ?? null,
     categorie_poids: athlete.categorie_poids ?? null,
     numero_licence:  athlete.numero_licence  ?? null,
+    resultat:        raw.resultat ?? null,
+    points:          raw.points ?? null,
   };
 }
 
@@ -128,7 +134,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
   });
 
   /* ── Derived selection ── */
-  const actionableIds  = inscriptions.filter((i) => ACTIONNABLE.includes(i.statut)).map((i) => i.id);
+  // Après clôture (points attribués) ou annulation, l'API refuse toute modification d'inscription
+  const locked         = ev?.statut === "termine" || ev?.statut === "annule";
+  const actionableIds  = locked ? [] : inscriptions.filter((i) => ACTIONNABLE.includes(i.statut)).map((i) => i.id);
   const selectedList   = inscriptions.filter((i) => selected.has(i.id));
 
   // Which selected can be confirmed (not yet confirmed)
@@ -241,9 +249,16 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     </span>
                   )}
                 </div>
-                <span className={cn("inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border shrink-0", evStatusCfg.className)}>
-                  {evStatusCfg.label}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={cn("inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border", evStatusCfg.className)}>
+                    {evStatusCfg.label}
+                  </span>
+                  <Link href={`/events/${id}/edit`}>
+                    <Button size="sm" variant="outline" className="border-brand-border text-white hover:bg-white/5 h-7 px-2.5 text-xs">
+                      <Pencil className="size-3 mr-1" />Modifier
+                    </Button>
+                  </Link>
+                </div>
               </div>
               {ev.description && <p className="text-brand-muted text-sm mt-3 leading-relaxed">{ev.description}</p>}
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-5">
@@ -267,7 +282,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
             <div className="bg-brand-surface rounded-xl border border-brand-border">
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-brand-border gap-3">
-                <h3 className="text-white font-semibold">Athlètes inscrits</h3>
+                <div>
+                  <h3 className="text-white font-semibold">Athlètes inscrits</h3>
+                  {locked && (
+                    <p className="text-brand-muted text-xs mt-0.5">
+                      Événement {ev?.statut === "termine" ? "terminé" : "annulé"} : les inscriptions ne peuvent plus être modifiées.
+                    </p>
+                  )}
+                </div>
                 {inscriptions.length > 0 && (
                   <span className="text-brand-muted text-sm">
                     {inscriptions.length} inscription{inscriptions.length > 1 ? "s" : ""}
@@ -340,7 +362,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                     <tbody>
                       {inscriptions.map((insc) => {
                         const sCfg      = inscStatusConfig[insc.statut] ?? inscStatusConfig.en_attente;
-                        const canAction = ACTIONNABLE.includes(insc.statut);
+                        const canAction = !locked && ACTIONNABLE.includes(insc.statut);
                         const isChecked = selected.has(insc.id);
                         const busy      = confirmOne.isPending || rejectOne.isPending || cancelOne.isPending;
 
@@ -408,7 +430,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
                             {/* Actions individuelles — contextuelles selon le statut */}
                             <td className="px-5 py-3">
-                              <div className="flex items-center gap-1.5 justify-end">
+                              <div className={cn("flex items-center gap-1.5 justify-end", locked && "hidden")}>
                                 {/* propose / en_attente → Confirmer + Refuser */}
                                 {(insc.statut === "propose" || insc.statut === "en_attente") && (
                                   <>
@@ -459,6 +481,15 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               )}
             </div>
+
+            {/* ── Résultats (compétitions uniquement) ── */}
+            {ev.type === "competition" && (
+              <CompetitionResults
+                eventId={id}
+                eventStatut={ev.statut}
+                inscriptions={inscriptions.filter((i) => i.statut === "confirme")}
+              />
+            )}
           </div>
         )}
       </div>

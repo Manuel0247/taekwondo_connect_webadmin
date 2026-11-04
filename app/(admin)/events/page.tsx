@@ -3,17 +3,18 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Send, XCircle, Eye } from "lucide-react";
+import { Plus, Search, Send, XCircle, Eye, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
 import { EmptyState } from "@/components/admin/EmptyState";
+import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 
-type EventStatus = "brouillon" | "publie" | "annule";
+type EventStatus = "brouillon" | "publie" | "annule" | "termine";
 type EventType = "competition" | "passage_grade" | "stage" | "cours_special";
 
 interface Event {
@@ -29,6 +30,7 @@ const statusConfig: Record<EventStatus, { label: string; className: string }> = 
   brouillon: { label: "Brouillon", className: "bg-gray-500/15 text-gray-400 border-gray-500/30" },
   publie: { label: "Publié", className: "bg-brand-green/15 text-brand-green-light border-brand-green/30" },
   annule: { label: "Annulé", className: "bg-red-500/15 text-red-400 border-red-500/30" },
+  termine: { label: "Terminé", className: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
 };
 
 const typeLabels: Record<EventType, string> = {
@@ -38,10 +40,12 @@ const typeLabels: Record<EventType, string> = {
 export default function EventsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [toDelete, setToDelete] = useState<Event | null>(null);
 
   const { data: events, isLoading } = useQuery<Event[]>({
     queryKey: ["events"],
-    queryFn: async () => (await api.get("/events")).data.data,
+    // /admin/events renvoie tous les statuts (/events ne renvoie que les publiés)
+    queryFn: async () => (await api.get("/admin/events", { params: { limit: 200 } })).data.data,
   });
 
   const publishMutation = useMutation({
@@ -55,6 +59,23 @@ export default function EventsPage() {
     onSuccess: () => { toast.success("Événement annulé"); queryClient.invalidateQueries({ queryKey: ["events"] }); },
     onError: () => toast.error("Erreur"),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/events/${id}`),
+    onSuccess: () => {
+      toast.success("Événement supprimé");
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      setToDelete(null);
+    },
+    onError: (err) => {
+      const message = (err as { response?: { data?: { error?: { message?: string } } } })
+        ?.response?.data?.error?.message;
+      toast.error("Suppression impossible", { description: message });
+    },
+  });
+
+  // Une compétition terminée a déjà distribué ses points : l'API refuse sa suppression
+  const canDelete = (ev: Event) => !(ev.statut === "termine" && ev.type === "competition");
 
   const filtered = (events ?? []).filter((e) =>
     e.titre.toLowerCase().includes(search.toLowerCase())
@@ -109,6 +130,17 @@ export default function EventsPage() {
                                 <Eye className="size-3.5" />
                               </Button>
                             </Link>
+                            <Link href={`/events/${ev.id}/edit`}>
+                              <Button size="sm" variant="ghost" className="text-brand-muted hover:text-white h-7 px-2" title="Modifier">
+                                <Pencil className="size-3.5" />
+                              </Button>
+                            </Link>
+                            {canDelete(ev) && (
+                              <Button size="sm" variant="ghost" onClick={() => setToDelete(ev)}
+                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-7 px-2" title="Supprimer">
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
                             {ev.statut === "brouillon" && (
                               <Button size="sm" onClick={() => publishMutation.mutate(ev.id)}
                                 className="bg-brand-green hover:bg-brand-green-light text-white h-7 px-2.5 text-xs">
@@ -132,6 +164,17 @@ export default function EventsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onOpenChange={(open) => { if (!open) setToDelete(null); }}
+        title="Supprimer l'événement"
+        description={`Supprimer définitivement « ${toDelete?.titre} » et toutes ses inscriptions ? Cette action est irréversible.`}
+        variant="destructive"
+        confirmLabel="Supprimer"
+        loading={deleteMutation.isPending}
+        onConfirm={() => toDelete && deleteMutation.mutate(toDelete.id)}
+      />
     </div>
   );
 }

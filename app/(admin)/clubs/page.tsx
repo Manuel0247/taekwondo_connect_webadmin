@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, PauseCircle, Search, Filter, Eye } from "lucide-react";
+import { CheckCircle2, XCircle, PauseCircle, PlayCircle, Search, Filter, Eye } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
 import { ClubStatusBadge } from "@/components/admin/ClubStatusBadge";
@@ -58,19 +58,9 @@ export default function ClubsPage() {
   const { data: clubs, isLoading } = useQuery<Club[]>({
     queryKey: ["clubs"],
     queryFn: async () => {
-      // /clubs returns only validated clubs; /clubs/pending returns pending ones.
-      // Merge both to show all clubs in the admin table.
-      const [valRes, penRes] = await Promise.all([
-        api.get("/clubs").catch(() => ({ data: { data: [] } })),
-        api.get("/clubs/pending").catch(() => ({ data: { data: [] } })),
-      ]);
-      const validated = Array.isArray(valRes.data.data) ? valRes.data.data : [];
-      const pending   = Array.isArray(penRes.data.data) ? penRes.data.data : [];
-      // Deduplicate by id (in case a club appears in both)
-      const seen = new Set<string>();
-      return [...validated, ...pending]
-        .filter((c) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; })
-        .map(normalizeClub);
+      // /admin/clubs renvoie tous les statuts (validés, en attente, suspendus)
+      const res = await api.get("/admin/clubs", { params: { limit: 200 } });
+      return (Array.isArray(res.data.data) ? res.data.data : []).map(normalizeClub);
     },
   });
 
@@ -202,6 +192,12 @@ export default function ClubsPage() {
                             <Button size="sm" variant="outline" onClick={() => openAction(club, "suspend")}
                               className="border-orange-500/50 text-orange-400 hover:bg-orange-500/10 h-7 px-2.5 text-xs">
                               <PauseCircle className="size-3 mr-1" />Suspendre
+                            </Button>
+                          )}
+                          {club.statut === "suspendu" && (
+                            <Button size="sm" onClick={() => openAction(club, "validate")}
+                              className="bg-brand-green hover:bg-brand-green-light text-white h-7 px-2.5 text-xs">
+                              <PlayCircle className="size-3 mr-1" />Réactiver
                             </Button>
                           )}
                         </div>

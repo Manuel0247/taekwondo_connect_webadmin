@@ -13,13 +13,20 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import { Building2, Users, Trophy, BookOpen, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Building2, Users, Trophy, BookOpen, CheckCircle2, XCircle, Loader2, Download } from "lucide-react";
 import { toast } from "sonner";
 import { TopBar } from "@/components/admin/TopBar";
 import { StatsCard } from "@/components/admin/StatsCard";
 import { ClubStatusBadge } from "@/components/admin/ClubStatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import api from "@/lib/api";
 
 const GRADE_COLORS = ["#E8650A", "#1B7A3F", "#2EA55A", "#F5A05C", "#8E8E93", "#3A3A3C", "#0A0A0A"];
@@ -29,6 +36,48 @@ interface DashboardData {
   total_clubs: number;
   total_events: number;
   total_courses: number;
+  clubs: { valides: number; en_attente: number; suspendus: number };
+  evenements: { publies: number; termines: number; autres: number };
+}
+
+const EXPORTS = [
+  { type: "clubs",       label: "Clubs" },
+  { type: "athletes",    label: "Athlètes" },
+  { type: "evenements",  label: "Événements" },
+  { type: "classements", label: "Classements" },
+] as const;
+
+function Breakdown({ title, icon: Icon, items }: {
+  title: string;
+  icon: typeof Building2;
+  items: { label: string; value: number; color: string }[];
+}) {
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return (
+    <div className="bg-brand-surface rounded-xl border border-brand-border p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Icon className="size-4 text-brand-muted" />
+        <h3 className="text-white font-semibold">{title}</h3>
+      </div>
+      {/* Barre de répartition */}
+      <div className="flex h-2 rounded-full overflow-hidden bg-brand-black mb-4">
+        {total > 0 && items.map((i) => (
+          <div key={i.label} className={i.color} style={{ width: `${(i.value / total) * 100}%` }} />
+        ))}
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {items.map((i) => (
+          <div key={i.label}>
+            <div className="flex items-center gap-1.5">
+              <span className={`size-2 rounded-full ${i.color}`} />
+              <span className="text-brand-muted text-xs">{i.label}</span>
+            </div>
+            <p className="text-white text-xl font-bold mt-0.5">{i.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 interface Club {
@@ -73,6 +122,17 @@ export default function DashboardPage() {
         total_users:   vg.athletes   ?? d.athletes?.total   ?? 0,
         total_events:  vg.evenements ?? d.evenements?.total ?? 0,
         total_courses: vg.cours      ?? d.cours?.total      ?? 0,
+        clubs: {
+          valides:    d.clubs?.valides    ?? 0,
+          en_attente: d.clubs?.en_attente ?? 0,
+          suspendus:  d.clubs?.suspendus  ?? 0,
+        },
+        // Catégories exclusives (« à venir » recoupe « publiés ») : le reste = brouillons et annulés
+        evenements: {
+          publies:  d.evenements?.publies  ?? 0,
+          termines: d.evenements?.termines ?? 0,
+          autres:   Math.max(0, (d.evenements?.total ?? 0) - (d.evenements?.publies ?? 0) - (d.evenements?.termines ?? 0)),
+        },
       };
     },
   });
@@ -112,6 +172,28 @@ export default function DashboardPage() {
     },
   });
 
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  // Téléchargement via axios (le jeton est dans l'en-tête, un simple lien ne suffirait pas)
+  const exportCsv = async (type: string) => {
+    setExporting(type);
+    try {
+      const res = await api.get("/admin/dashboard/export", { params: { type }, responseType: "blob" });
+      const disposition: string = res.headers["content-disposition"] ?? "";
+      const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] ?? `${type}.csv`;
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Export impossible");
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const validateMutation = useMutation({
     mutationFn: (id: string) => api.put(`/admin/clubs/${id}/validate`),
     onSuccess: () => {
@@ -136,6 +218,25 @@ export default function DashboardPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <TopBar title="Dashboard" />
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex justify-end">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" disabled={!!exporting}
+                className="border-brand-border bg-brand-surface text-white hover:bg-white/5">
+                {exporting ? <Loader2 className="size-4 mr-1.5 animate-spin" /> : <Download className="size-4 mr-1.5" />}
+                Exporter (CSV)
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-brand-surface border-brand-border text-white">
+              {EXPORTS.map((e) => (
+                <DropdownMenuItem key={e.type} onClick={() => exportCsv(e.type)} className="cursor-pointer">
+                  {e.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {statsLoading ? (
@@ -151,6 +252,30 @@ export default function DashboardPage() {
             </>
           )}
         </div>
+
+        {/* Répartition clubs / événements */}
+        {!statsLoading && stats && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Breakdown
+              title="Clubs par statut"
+              icon={Building2}
+              items={[
+                { label: "Validés",    value: stats.clubs.valides,    color: "bg-brand-green" },
+                { label: "En attente", value: stats.clubs.en_attente, color: "bg-brand-orange" },
+                { label: "Suspendus",  value: stats.clubs.suspendus,  color: "bg-red-500" },
+              ]}
+            />
+            <Breakdown
+              title="Événements"
+              icon={Trophy}
+              items={[
+                { label: "Publiés",             value: stats.evenements.publies,  color: "bg-brand-green" },
+                { label: "Terminés",            value: stats.evenements.termines, color: "bg-blue-500" },
+                { label: "Brouillons / annulés", value: stats.evenements.autres,   color: "bg-gray-500" },
+              ]}
+            />
+          </div>
+        )}
 
         {/* Charts */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
