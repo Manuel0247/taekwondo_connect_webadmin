@@ -12,11 +12,18 @@ const config: Record<Grade, { label: string; className: string }> = {
   noir: { label: "Noir", className: "bg-gray-900 text-white border border-gray-600" },
 };
 
-export function GradeChip({ grade }: { grade: Grade }) {
-  const { label, className } = config[grade] ?? {
+/** « 1er dan », « 2e dan »… */
+export function danLabel(dan: number): string {
+  return `${dan}${dan === 1 ? "er" : "e"} dan`;
+}
+
+/** L'admin voit le dan exact des ceintures noires (« Noir · 2e dan ») */
+export function GradeChip({ grade, dan }: { grade: Grade; dan?: number | null }) {
+  const { label: base, className } = config[grade] ?? {
     label: grade,
     className: "bg-gray-600 text-white",
   };
+  const label = grade === "noir" && dan ? `${base} · ${danLabel(dan)}` : base;
 
   return (
     <span

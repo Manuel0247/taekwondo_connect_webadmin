@@ -30,6 +30,30 @@ interface Club {
   nb_athletes?: number;
   athletes_count?: number;
   statut: "en_attente" | "valide" | "suspendu" | "refuse";
+  cotisation_federale_a_jour?: boolean;
+  cotisation_ligue_a_jour?: boolean;
+}
+
+type CotisationType = "federale" | "ligue";
+const COTISATION_LABELS: Record<CotisationType, string> = { federale: "fédérale", ligue: "de la ligue" };
+const ANNEE_COURANTE = new Date().getFullYear();
+const ANNEES = [ANNEE_COURANTE + 1, ANNEE_COURANTE, ANNEE_COURANTE - 1, ANNEE_COURANTE - 2];
+
+function CotisationBadge({ aJour, onClick }: { aJour?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Cliquer pour changer"
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap transition-colors ${
+        aJour
+          ? "bg-brand-green/15 text-green-400 hover:bg-brand-green/25"
+          : "bg-red-500/15 text-red-400 hover:bg-red-500/25"
+      }`}
+    >
+      {aJour ? "À jour" : "Pas à jour"}
+    </button>
+  );
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,12 +78,14 @@ export default function ClubsPage() {
   const [selectedClub, setSelectedClub] = useState<Club | null>(null);
   const [actionType, setActionType] = useState<ActionType>(null);
   const [motif, setMotif] = useState("");
+  const [annee, setAnnee] = useState(ANNEE_COURANTE);
+  const [cotisation, setCotisation] = useState<{ club: Club; type: CotisationType; aJour: boolean } | null>(null);
 
   const { data: clubs, isLoading } = useQuery<Club[]>({
-    queryKey: ["clubs"],
+    queryKey: ["clubs", annee],
     queryFn: async () => {
-      // /admin/clubs renvoie tous les statuts (validés, en attente, suspendus)
-      const res = await api.get("/admin/clubs", { params: { limit: 200 } });
+      // /admin/clubs renvoie tous les statuts (validés, en attente, suspendus) et les cotisations de l'année
+      const res = await api.get("/admin/clubs", { params: { limit: 200, annee } });
       return (Array.isArray(res.data.data) ? res.data.data : []).map(normalizeClub);
     },
   });
@@ -78,6 +104,19 @@ export default function ClubsPage() {
       setSelectedClub(null);
       setActionType(null);
       setMotif("");
+    },
+    onError: () => toast.error("Une erreur est survenue"),
+  });
+
+  const cotisationMutation = useMutation({
+    mutationFn: async ({ club, type, aJour }: { club: Club; type: CotisationType; aJour: boolean }) => {
+      const url = `/admin/clubs/${club.id}/cotisations/${type}/${annee}`;
+      return aJour ? api.delete(url) : api.put(url);
+    },
+    onSuccess: (_, { aJour }) => {
+      toast.success(aJour ? "Cotisation marquée non à jour" : "Cotisation marquée à jour");
+      queryClient.invalidateQueries({ queryKey: ["clubs"] });
+      setCotisation(null);
     },
     onError: () => toast.error("Une erreur est survenue"),
   });
@@ -131,6 +170,16 @@ export default function ClubsPage() {
               </SelectContent>
             </Select>
           </div>
+          <Select value={String(annee)} onValueChange={(v) => setAnnee(Number(v))}>
+            <SelectTrigger className="w-[150px] bg-brand-surface border-brand-border text-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-brand-surface border-brand-border text-white">
+              {ANNEES.map((a) => (
+                <SelectItem key={a} value={String(a)}>Cotisations {a}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Link href="/clubs/new" className="ml-auto">
             <Button className="bg-brand-orange hover:bg-brand-orange-light text-white">
               <Plus className="size-4 mr-1.5" />Nouveau club
@@ -158,6 +207,8 @@ export default function ClubsPage() {
                     <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Maître</th>
                     <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Athlètes</th>
                     <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Statut</th>
+                    <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Cot. fédérale {annee}</th>
+                    <th className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">Cot. ligue {annee}</th>
                     <th className="px-5 py-3" />
                   </tr>
                 </thead>
@@ -173,6 +224,14 @@ export default function ClubsPage() {
                       <td className="px-5 py-3">
                         <ClubStatusBadge status={club.statut} />
                       </td>
+                      {(["federale", "ligue"] as const).map((type) => {
+                        const aJour = !!club[`cotisation_${type}_a_jour`];
+                        return (
+                          <td key={type} className="px-5 py-3">
+                            <CotisationBadge aJour={aJour} onClick={() => setCotisation({ club, type, aJour })} />
+                          </td>
+                        );
+                      })}
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-1.5 justify-end">
                           <Link href={`/clubs/${club.id}`}>
@@ -238,6 +297,19 @@ export default function ClubsPage() {
           </div>
         )}
       </ConfirmDialog>
+
+      <ConfirmDialog
+        open={!!cotisation}
+        onOpenChange={(open) => { if (!open) setCotisation(null); }}
+        title={cotisation?.aJour ? "Annuler la cotisation" : "Cotisation payée"}
+        description={cotisation
+          ? `Marquer la cotisation ${COTISATION_LABELS[cotisation.type]} ${annee} du club "${cotisation.club.nom}" comme ${cotisation.aJour ? "non payée" : "payée"} ?`
+          : ""}
+        variant={cotisation?.aJour ? "destructive" : "default"}
+        confirmLabel={cotisation?.aJour ? "Marquer non à jour" : "Marquer à jour"}
+        loading={cotisationMutation.isPending}
+        onConfirm={() => cotisation && cotisationMutation.mutate(cotisation)}
+      />
     </div>
   );
 }

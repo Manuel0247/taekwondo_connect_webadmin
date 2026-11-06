@@ -16,6 +16,7 @@ interface Athlete {
   nom: string;
   email: string;
   grade?: string;
+  dan?: number | null;
   club?: { nom: string };
   date_naissance?: string;
   sexe?: string;
@@ -31,6 +32,7 @@ function normalize(raw: any): Athlete {
     nom:             raw.nom             ?? u.nom             ?? "",
     email:           raw.email           ?? u.email           ?? u.identifiant     ?? "",
     grade:           raw.grade           ?? undefined,
+    dan:             raw.dan             ?? null,
     club:            raw.club            ?? undefined,
     date_naissance:  raw.date_naissance  ?? u.date_naissance  ?? undefined,
     sexe:            raw.sexe            ?? u.sexe            ?? undefined,
@@ -113,7 +115,7 @@ export default function AthletesPage() {
                       <td className="px-5 py-3 text-brand-muted text-sm">{athlete.club?.nom ?? "—"}</td>
                       <td className="px-5 py-3">
                         {athlete.grade ? (
-                          <GradeChip grade={athlete.grade as Parameters<typeof GradeChip>[0]["grade"]} />
+                          <GradeChip grade={athlete.grade as Parameters<typeof GradeChip>[0]["grade"]} dan={athlete.dan} />
                         ) : (
                           <span className="text-brand-muted text-sm">—</span>
                         )}

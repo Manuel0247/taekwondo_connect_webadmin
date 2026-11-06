@@ -1,166 +1,277 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { RefreshCw, Plus, Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Trophy, ClipboardCheck, CalendarDays } from "lucide-react";
 import { TopBar } from "@/components/admin/TopBar";
 import { EmptyState } from "@/components/admin/EmptyState";
+import { GradeChip } from "@/components/admin/GradeChip";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import type { Resolver } from "react-hook-form";
-import { z } from "zod";
 import api from "@/lib/api";
 
-const pointsSchema = z.object({
-  athlete_id: z.string().min(1),
-  points: z.number().int().min(1),
-  categorie: z.enum(["poids", "grade", "age"]),
-  valeur_categorie: z.string().min(1),
-  saison: z.string().min(4),
-});
-type PointsForm = z.infer<typeof pointsSchema>;
+/* Classement par événement terminé : compétitions (résultats) et passages de grade (notes). Lecture seule. */
 
-interface Ranking { id: string; position: number; points: number; athlete?: { prenom: string; nom: string }; club?: { nom: string }; }
+type EventKind = "competition" | "passage_grade";
+
+interface RankedEvent {
+  id: string;
+  titre: string;
+  type: EventKind;
+  date_debut: string;
+}
+
+interface Participant {
+  id: string;
+  prenom: string;
+  nom: string;
+  club: string | null;
+  grade: string | null;
+  dan: number | null;
+  categorie_poids: string | null;
+  resultat: string | null;
+  points: number | null;
+  note: number | null;
+}
+
+const RESULTAT_ORDRE: Record<string, number> = { or: 1, argent: 2, bronze: 3, participant: 4 };
+const RESULTAT_LABEL: Record<string, string> = { or: "🥇 Or", argent: "🥈 Argent", bronze: "🥉 Bronze", participant: "Participant" };
+
+const FILTRES: { value: "tous" | EventKind; label: string }[] = [
+  { value: "tous", label: "Tous" },
+  { value: "competition", label: "Compétitions" },
+  { value: "passage_grade", label: "Passages de grade" },
+];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalize(raw: any): Participant {
+  const athlete = raw.athlete ?? {};
+  const user = athlete.user ?? {};
+  return {
+    id: raw.id,
+    prenom: user.prenom ?? "—",
+    nom: user.nom ?? "",
+    club: athlete.club?.nom ?? null,
+    grade: athlete.grade ?? null,
+    dan: athlete.dan ?? null,
+    categorie_poids: athlete.categorie_poids ?? null,
+    resultat: raw.resultat ?? null,
+    points: raw.points ?? null,
+    note: raw.note != null ? Number(raw.note) : null,
+  };
+}
+
+/** Rang avec ex æquo : deux valeurs égales partagent le même rang */
+function withRanks<T>(items: T[], key: (item: T) => number | null): { item: T; rang: number | null }[] {
+  let rang = 0;
+  let previous: number | null | undefined;
+  return items.map((item, i) => {
+    const value = key(item);
+    if (value == null) return { item, rang: null };
+    if (value !== previous) rang = i + 1;
+    previous = value;
+    return { item, rang };
+  });
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function RankBadge({ rang }: { rang: number | null }) {
+  if (rang == null) return <span className="text-brand-muted text-sm">—</span>;
+  const cls =
+    rang === 1 ? "bg-yellow-500 text-white"
+    : rang === 2 ? "bg-gray-400 text-white"
+    : rang === 3 ? "bg-amber-600 text-white"
+    : "bg-brand-black text-brand-muted";
+  return <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${cls}`}>{rang}</span>;
+}
+
+function GradeCell({ grade, dan }: { grade: string | null; dan: number | null }) {
+  return grade
+    ? <GradeChip grade={grade as Parameters<typeof GradeChip>[0]["grade"]} dan={dan} />
+    : <span className="text-brand-muted text-sm">—</span>;
+}
+
+const th = "text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider";
+
+function EventRanking({ event }: { event: RankedEvent }) {
+  const [poids, setPoids] = useState("toutes");
+
+  const { data: participants = [], isLoading } = useQuery<Participant[]>({
+    queryKey: ["event-inscriptions", event.id],
+    queryFn: async () => {
+      const res = await api.get(`/events/${event.id}/inscriptions`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (res.data.data ?? []).filter((i: any) => i.statut === "confirme").map(normalize);
+    },
+  });
+
+  if (isLoading) {
+    return <div className="p-5 space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg bg-brand-black" />)}</div>;
+  }
+  if (!participants.length) return <EmptyState message="Aucun participant confirmé" />;
+
+  if (event.type === "passage_grade") {
+    const sorted = [...participants].sort((a, b) =>
+      (b.note ?? -1) - (a.note ?? -1) || a.nom.localeCompare(b.nom));
+    return (
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-brand-border">
+            <th className={th}>#</th><th className={th}>Athlète</th><th className={th}>Club</th><th className={th}>Grade</th>
+            <th className={`${th} text-right`}>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {withRanks(sorted, (p) => p.note).map(({ item: p, rang }) => (
+            <tr key={p.id} className="border-b border-brand-border/50">
+              <td className="px-5 py-3"><RankBadge rang={rang} /></td>
+              <td className="px-5 py-3 text-white text-sm font-medium">{p.prenom} {p.nom}</td>
+              <td className="px-5 py-3 text-brand-muted text-sm">{p.club ?? "—"}</td>
+              <td className="px-5 py-3"><GradeCell grade={p.grade} dan={p.dan} /></td>
+              <td className="px-5 py-3 text-right text-sm">
+                {p.note != null ? <span className="text-brand-orange font-bold">{p.note}</span> : <span className="text-brand-muted">Non noté</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  // Compétition : classement par résultat, éventuellement par catégorie de poids
+  const categories = [...new Set(participants.map((p) => p.categorie_poids).filter((c): c is string => !!c))].sort();
+  const visibles = poids === "toutes" ? participants : participants.filter((p) => p.categorie_poids === poids);
+  const sorted = [...visibles].sort((a, b) =>
+    (RESULTAT_ORDRE[a.resultat ?? ""] ?? 5) - (RESULTAT_ORDRE[b.resultat ?? ""] ?? 5) || a.nom.localeCompare(b.nom));
+
+  return (
+    <>
+      {categories.length > 1 && (
+        <div className="px-5 pt-4">
+          <Select value={poids} onValueChange={setPoids}>
+            <SelectTrigger className="w-[200px] h-8 bg-brand-black border-brand-border text-white text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent className="bg-brand-surface border-brand-border text-white">
+              <SelectItem value="toutes">Toutes les catégories</SelectItem>
+              {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      <table className="w-full mt-2">
+        <thead>
+          <tr className="border-b border-brand-border">
+            <th className={th}>#</th><th className={th}>Athlète</th><th className={th}>Club</th><th className={th}>Grade</th>
+            <th className={th}>Poids</th><th className={th}>Résultat</th><th className={`${th} text-right`}>Points</th>
+          </tr>
+        </thead>
+        <tbody>
+          {withRanks(sorted, (p) => (p.resultat ? RESULTAT_ORDRE[p.resultat] ?? null : null)).map(({ item: p, rang }) => (
+            <tr key={p.id} className="border-b border-brand-border/50">
+              <td className="px-5 py-3"><RankBadge rang={rang} /></td>
+              <td className="px-5 py-3 text-white text-sm font-medium">{p.prenom} {p.nom}</td>
+              <td className="px-5 py-3 text-brand-muted text-sm">{p.club ?? "—"}</td>
+              <td className="px-5 py-3"><GradeCell grade={p.grade} dan={p.dan} /></td>
+              <td className="px-5 py-3 text-brand-muted text-sm">{p.categorie_poids ?? "—"}</td>
+              <td className="px-5 py-3 text-white text-sm">{p.resultat ? RESULTAT_LABEL[p.resultat] ?? p.resultat : "—"}</td>
+              <td className="px-5 py-3 text-right text-sm">
+                {p.points != null ? <span className="text-brand-orange font-bold">{p.points} pts</span> : <span className="text-brand-muted">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
 
 export default function RankingsPage() {
-  const queryClient = useQueryClient();
-  const [tab, setTab] = useState("grade");
-  const [saison, setSaison] = useState("2026");
-  const [modalOpen, setModalOpen] = useState(false);
+  const [filtre, setFiltre] = useState<"tous" | EventKind>("tous");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { data: rankings, isLoading } = useQuery<Ranking[]>({
-    queryKey: ["rankings", tab, saison],
-    queryFn: async () => (await api.get("/rankings", { params: { categorie: tab, saison } })).data.data,
-  });
-
-  const recalcMutation = useMutation({
-    mutationFn: () => api.post("/admin/rankings/recalculate"),
-    onSuccess: () => { toast.success("Classements recalculés"); queryClient.invalidateQueries({ queryKey: ["rankings"] }); },
-    onError: () => toast.error("Erreur"),
-  });
-
-  const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<PointsForm>({
-    resolver: zodResolver(pointsSchema) as unknown as Resolver<PointsForm>,
-    defaultValues: { categorie: "grade", saison: "2026" },
-  });
-
-  const addPointsMutation = useMutation({
-    mutationFn: (data: PointsForm) => api.put(`/admin/rankings/athlete/${data.athlete_id}/points`, data),
-    onSuccess: () => {
-      toast.success("Points ajoutés");
-      queryClient.invalidateQueries({ queryKey: ["rankings"] });
-      setModalOpen(false); reset();
+  const { data: events = [], isLoading } = useQuery<RankedEvent[]>({
+    queryKey: ["events", "termine"],
+    queryFn: async () => {
+      const res = await api.get("/admin/events", { params: { statut: "termine", limit: 200 } });
+      return (res.data.data ?? []).filter((e: RankedEvent) => e.type === "competition" || e.type === "passage_grade");
     },
-    onError: () => toast.error("Erreur"),
   });
+
+  const visibles = events.filter((e) => filtre === "tous" || e.type === filtre);
+  const selected = visibles.find((e) => e.id === selectedId) ?? visibles[0] ?? null;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <TopBar title="Classements" />
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <Label className="text-white text-sm">Saison :</Label>
-            <Select value={saison} onValueChange={setSaison}>
-              <SelectTrigger className="w-28 bg-brand-surface border-brand-border text-white h-9"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-brand-surface border-brand-border text-white">
-                {["2026", "2025", "2024"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => recalcMutation.mutate()} disabled={recalcMutation.isPending}
-              className="border-brand-border text-white hover:bg-white/5 h-9">
-              {recalcMutation.isPending ? <Loader2 className="size-4 animate-spin mr-1.5" /> : <RefreshCw className="size-4 mr-1.5" />}
-              Recalculer
-            </Button>
-            <Button onClick={() => setModalOpen(true)} className="bg-brand-orange hover:bg-brand-orange-light text-white h-9">
-              <Plus className="size-4 mr-1.5" />Ajouter des points
-            </Button>
-          </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {FILTRES.map((f) => (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setFiltre(f.value)}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-medium border transition-colors ${
+                filtre === f.value
+                  ? "bg-brand-orange border-brand-orange text-white"
+                  : "bg-brand-surface border-brand-border text-brand-muted hover:text-white"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="bg-brand-surface border border-brand-border">
-            {[["grade","Par grade"],["poids","Par poids"],["age","Par âge"]].map(([v,l]) => (
-              <TabsTrigger key={v} value={v} className="data-[state=active]:bg-brand-orange data-[state=active]:text-white text-brand-muted">
-                {l}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {["grade","poids","age"].map((cat) => (
-            <TabsContent key={cat} value={cat} className="mt-4">
-              <div className="bg-brand-surface rounded-xl border border-brand-border overflow-hidden">
-                {isLoading ? (
-                  <div className="p-5 space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg bg-brand-black" />)}</div>
-                ) : !rankings?.length ? <EmptyState message="Aucun classement" /> : (
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-brand-border">
-                        {["#","Athlète","Club","Points"].map((h) => (
-                          <th key={h} className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rankings.map((r) => (
-                        <tr key={r.id} className="border-b border-brand-border/50 hover:bg-white/2">
-                          <td className="px-5 py-3">
-                            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
-                              ${r.position === 1 ? "bg-yellow-500 text-white" : r.position === 2 ? "bg-gray-400 text-white" : r.position === 3 ? "bg-amber-600 text-white" : "bg-brand-black text-brand-muted"}`}>
-                              {r.position}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-white text-sm font-medium">{r.athlete?.prenom} {r.athlete?.nom}</td>
-                          <td className="px-5 py-3 text-brand-muted text-sm">{r.club?.nom ?? "—"}</td>
-                          <td className="px-5 py-3 text-brand-orange font-bold text-sm">{r.points}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </TabsContent>
-          ))}
-        </Tabs>
-      </div>
-
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="bg-brand-surface border-brand-border text-white max-w-md">
-          <DialogHeader><DialogTitle className="text-white">Ajouter des points</DialogTitle></DialogHeader>
-          <form onSubmit={handleSubmit((d) => addPointsMutation.mutate(d))} className="space-y-4 mt-2">
-            {[["ID Athlète", "athlete_id", "uuid…"], ["Points", "points", "50"], ["Valeur catégorie", "valeur_categorie", "-80kg"], ["Saison", "saison", "2026"]].map(([lbl, name, ph]) => (
-              <div key={name} className="space-y-1.5">
-                <Label className="text-white">{lbl}</Label>
-                <Input type={name === "points" ? "number" : "text"} placeholder={ph}
-                  className="bg-brand-black border-brand-border text-white placeholder:text-brand-muted"
-                  {...register(name as keyof PointsForm)} />
-                {errors[name as keyof PointsForm] && <p className="text-red-400 text-xs">{errors[name as keyof PointsForm]?.message as string}</p>}
-              </div>
-            ))}
-            <div className="space-y-1.5">
-              <Label className="text-white">Catégorie</Label>
-              <Select defaultValue="grade" onValueChange={(v) => setValue("categorie", v as PointsForm["categorie"])}>
-                <SelectTrigger className="bg-brand-black border-brand-border text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-brand-surface border-brand-border text-white">
-                  {[["grade","Grade"],["poids","Poids"],["age","Âge"]].map(([v,l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                </SelectContent>
-              </Select>
+        {isLoading ? (
+          <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg bg-brand-surface" />)}</div>
+        ) : !visibles.length ? (
+          <div className="bg-brand-surface rounded-xl border border-brand-border">
+            <EmptyState message="Aucun événement terminé. Le classement apparaît ici une fois une compétition ou un passage de grade clôturé." />
+          </div>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-[300px_1fr] items-start">
+            <div className="bg-brand-surface rounded-xl border border-brand-border overflow-hidden">
+              {visibles.map((e) => {
+                const actif = selected?.id === e.id;
+                const Icon = e.type === "competition" ? Trophy : ClipboardCheck;
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    onClick={() => setSelectedId(e.id)}
+                    className={`w-full text-left px-4 py-3 border-b border-brand-border/50 last:border-b-0 flex gap-3 items-start transition-colors border-l-2 ${
+                      actif ? "bg-white/5 border-l-brand-orange" : "border-l-transparent hover:bg-white/2"
+                    }`}
+                  >
+                    <Icon className={`size-4 mt-0.5 shrink-0 ${e.type === "competition" ? "text-brand-orange" : "text-blue-400"}`} />
+                    <span className="min-w-0">
+                      <span className="block text-white text-sm font-medium truncate">{e.titre}</span>
+                      <span className="flex items-center gap-1 text-brand-muted text-xs mt-0.5">
+                        <CalendarDays className="size-3" />{formatDate(e.date_debut)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            <Button type="submit" disabled={addPointsMutation.isPending} className="w-full bg-brand-orange hover:bg-brand-orange-light text-white">
-              {addPointsMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Ajouter"}
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
+
+            {selected && (
+              <div className="bg-brand-surface rounded-xl border border-brand-border overflow-hidden">
+                <div className="px-5 py-4 border-b border-brand-border">
+                  <h3 className="text-white font-semibold">{selected.titre}</h3>
+                  <p className="text-brand-muted text-xs mt-0.5">
+                    {selected.type === "competition" ? "Compétition" : "Passage de grade"} · {formatDate(selected.date_debut)}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <EventRanking key={selected.id} event={selected} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

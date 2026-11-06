@@ -23,6 +23,7 @@ export interface ResultInscription {
   prenom: string;
   nom: string;
   grade: string | null;
+  dan?: number | null;
   categorie_poids: string | null;
   resultat: Resultat | null;
   points: number | null;
@@ -162,7 +163,7 @@ export function CompetitionResults({
                 return (
                   <tr key={insc.id} className="border-b border-brand-border/50">
                     <td className="px-5 py-3 text-white text-sm font-medium">{insc.prenom} {insc.nom}</td>
-                    <td className="px-5 py-3">{insc.grade ? <GradeChip grade={insc.grade as Parameters<typeof GradeChip>[0]["grade"]} /> : <span className="text-brand-muted text-sm">—</span>}</td>
+                    <td className="px-5 py-3">{insc.grade ? <GradeChip grade={insc.grade as Parameters<typeof GradeChip>[0]["grade"]} dan={insc.dan} /> : <span className="text-brand-muted text-sm">—</span>}</td>
                     <td className="px-5 py-3 text-brand-muted text-sm">{insc.categorie_poids ?? "—"}</td>
                     <td className="px-5 py-3">
                       <Select

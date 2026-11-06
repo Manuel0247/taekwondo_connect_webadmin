@@ -44,7 +44,7 @@ export default function AthleteDetailPage({ params }: { params: Promise<{ id: st
               <div>
                 <h2 className="text-white text-xl font-bold">{athlete.prenom} {athlete.nom}</h2>
                 <p className="text-brand-muted text-sm">{athlete.email}</p>
-                {athlete.grade && <div className="mt-2"><GradeChip grade={athlete.grade} /></div>}
+                {athlete.grade && <div className="mt-2"><GradeChip grade={athlete.grade} dan={athlete.dan} /></div>}
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

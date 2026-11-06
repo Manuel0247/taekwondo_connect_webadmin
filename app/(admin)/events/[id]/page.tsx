@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft, Calendar, MapPin, Users, Clock,
-  Mail, Weight, CheckCircle2, XCircle, Loader2, Ban, Pencil,
+  Mail, Weight, CheckCircle2, XCircle, Loader2, Ban, Pencil, Wallet, Undo2,
 } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CompetitionResults, type Resultat } from "@/components/admin/CompetitionResults";
+import { TARIF_GRADES } from "@/components/admin/EventForm";
+import { GradeExamNotes } from "@/components/admin/GradeExamNotes";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 
@@ -28,15 +30,21 @@ interface Inscription {
   id:              string;
   statut:          InscriptionStatus;
   commentaire:     string | null;
+  note:            number | null;
   prenom:          string;
   nom:             string;
   email:           string | null;
   grade:           string | null;
+  dan:             number | null;
   categorie_poids: string | null;
   numero_licence:  string | null;
   resultat:        Resultat | null;
   points:          number | null;
+  montant_du:      number | null;
+  paye_le:         string | null;
 }
+
+const formatFcfa = (n: number) => `${n.toLocaleString("fr-FR")} FCFA`;
 
 /* ── Config ── */
 const eventStatusConfig: Record<EventStatus, { label: string; className: string }> = {
@@ -70,10 +78,14 @@ function normalize(raw: any): Inscription {
     nom:             user.nom      ?? athlete.nom      ?? "—",
     email:           user.email    ?? athlete.email    ?? null,
     grade:           athlete.grade ?? null,
+    dan:             athlete.dan ?? null,
     categorie_poids: athlete.categorie_poids ?? null,
     numero_licence:  athlete.numero_licence  ?? null,
     resultat:        raw.resultat ?? null,
     points:          raw.points ?? null,
+    note:            raw.note ?? null,
+    montant_du:      raw.montant_du ?? null,
+    paye_le:         raw.paye_le ?? null,
   };
 }
 
@@ -95,6 +107,9 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
 
   /* ── Bulk cancel confirm dialog ── */
   const [cancelOpen,  setCancelOpen]  = useState(false);
+
+  /* ── Paiement : validation / annulation ── */
+  const [paiementTarget, setPaiementTarget] = useState<{ insc: Inscription; annuler: boolean } | null>(null);
 
   /* ── Queries ── */
   const { data: ev, isLoading } = useQuery({
@@ -131,6 +146,22 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     mutationFn: (iid: string) => api.delete(`/events/${id}/inscriptions/${iid}`),
     onSuccess: () => { toast.success("Inscription annulée"); invalidate(); },
     onError:   () => toast.error("Erreur lors de l'annulation"),
+  });
+
+  const paiement = useMutation({
+    mutationFn: ({ insc, annuler }: { insc: Inscription; annuler: boolean }) => {
+      const url = `/events/${id}/inscriptions/${insc.id}/paiement`;
+      return annuler ? api.delete(url) : api.put(url);
+    },
+    onSuccess: (_, { annuler }) => {
+      toast.success(annuler ? "Paiement annulé" : "Paiement validé");
+      setPaiementTarget(null);
+      invalidate();
+    },
+    onError: (err) => {
+      const message = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+      toast.error("Opération impossible", { description: message });
+    },
   });
 
   /* ── Derived selection ── */
@@ -218,6 +249,14 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
     refuses:   inscriptions.filter((i) => i.statut === "refuse").length,
     annules:   inscriptions.filter((i) => i.statut === "annule").length,
   };
+  const actives    = inscriptions.filter((i) => i.statut !== "refuse" && i.statut !== "annule");
+  const payees     = actives.filter((i) => i.paye_le);
+  const encaisse   = payees.reduce((s, i) => s + (i.montant_du ?? 0), 0);
+  const aEncaisser = actives.filter((i) => !i.paye_le).reduce((s, i) => s + (i.montant_du ?? 0), 0);
+  const tarifLabel =
+    ev?.tarif_type === "variable"
+      ? "Variable selon le grade"
+      : ev?.prix ? formatFcfa(Number(ev.prix)) : "Gratuit";
 
   /* ── Render ── */
   return (
@@ -266,6 +305,25 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 {ev.date_fin && <InfoItem icon={Clock}   label="Fin"    value={new Date(ev.date_fin).toLocaleString("fr-FR")} />}
                 <InfoItem icon={MapPin}   label="Lieu"   value={ev.adresse ?? ev.lieu ?? "—"} />
                 <InfoItem icon={Users}    label="Places" value={`${ev.places_total ?? "—"} places`} />
+              </div>
+              <div className="mt-5 pt-5 border-t border-brand-border flex flex-wrap items-start gap-x-8 gap-y-3">
+                <InfoItem icon={Wallet} label="Participation" value={tarifLabel} />
+                {ev.tarif_type === "variable" && (
+                  <div className="flex flex-wrap gap-2">
+                    {TARIF_GRADES.filter((g) => ev.prix_par_grade?.[g.key] != null).map((g) => (
+                      <span key={g.key} className="inline-flex items-center gap-1.5 rounded-md bg-brand-black px-2.5 py-1 text-xs">
+                        <GradeChip grade={g.grade} dan={g.dan} />
+                        <span className="text-white font-medium">{formatFcfa(Number(ev.prix_par_grade[g.key]))}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {(encaisse > 0 || aEncaisser > 0) && (
+                  <p className="text-brand-muted text-xs sm:ml-auto self-center">
+                    <span className="text-brand-green-light font-semibold">{formatFcfa(encaisse)}</span> encaissés ({payees.length})
+                    {aEncaisser > 0 && <> · <span className="text-yellow-400 font-semibold">{formatFcfa(aEncaisser)}</span> en attente</>}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -354,7 +412,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                               className="rounded border-brand-border bg-brand-black accent-brand-orange cursor-pointer" />
                           )}
                         </th>
-                        {["Athlète", "Grade", "Catégorie", "Licence", "Statut", ""].map((h) => (
+                        {["Athlète", "Grade", "Catégorie", "Licence", "Statut", "Paiement", ""].map((h) => (
                           <th key={h} className="text-left px-5 py-3 text-brand-muted text-xs font-medium uppercase tracking-wider">{h}</th>
                         ))}
                       </tr>
@@ -400,7 +458,7 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                             {/* Grade */}
                             <td className="px-5 py-3">
                               {insc.grade
-                                ? <GradeChip grade={insc.grade as Parameters<typeof GradeChip>[0]["grade"]} />
+                                ? <GradeChip grade={insc.grade as Parameters<typeof GradeChip>[0]["grade"]} dan={insc.dan} />
                                 : <span className="text-brand-muted text-sm">—</span>}
                             </td>
 
@@ -426,6 +484,34 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                                   <p className="text-brand-muted text-xs italic">{insc.commentaire}</p>
                                 )}
                               </div>
+                            </td>
+
+                            {/* Paiement */}
+                            <td className="px-5 py-3">
+                              {insc.statut === "refuse" || insc.statut === "annule" ? (
+                                <span className="text-brand-muted text-sm">—</span>
+                              ) : insc.paye_le ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium border bg-brand-green/15 text-brand-green-light border-brand-green/30 whitespace-nowrap"
+                                    title={`Validé le ${new Date(insc.paye_le).toLocaleDateString("fr-FR")}`}>
+                                    Payé · {formatFcfa(insc.montant_du ?? 0)}
+                                  </span>
+                                  <button type="button" title="Annuler la validation"
+                                    onClick={() => setPaiementTarget({ insc, annuler: true })}
+                                    className="text-brand-muted hover:text-white">
+                                    <Undo2 className="size-3.5" />
+                                  </button>
+                                </div>
+                              ) : insc.montant_du != null ? (
+                                <Button size="sm" variant="outline" onClick={() => setPaiementTarget({ insc, annuler: false })}
+                                  className="border-brand-green/50 text-brand-green-light hover:bg-brand-green/10 h-7 px-2.5 text-xs whitespace-nowrap">
+                                  <Wallet className="size-3 mr-1" />Valider · {formatFcfa(insc.montant_du)}
+                                </Button>
+                              ) : (
+                                <span className="text-brand-muted text-xs">
+                                  {ev.tarif_type === "variable" ? "Pas de tarif pour ce grade" : "Gratuit"}
+                                </span>
+                              )}
                             </td>
 
                             {/* Actions individuelles — contextuelles selon le statut */}
@@ -490,9 +576,33 @@ export default function EventDetailPage({ params }: { params: Promise<{ id: stri
                 inscriptions={inscriptions.filter((i) => i.statut === "confirme")}
               />
             )}
+
+            {/* ── Notes (passages de grade uniquement) ── */}
+            {ev.type === "passage_grade" && (
+              <GradeExamNotes
+                eventId={id}
+                eventStatut={ev.statut}
+                inscriptions={inscriptions.filter((i) => i.statut === "confirme")}
+              />
+            )}
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!paiementTarget}
+        onOpenChange={(o) => { if (!o) setPaiementTarget(null); }}
+        title={paiementTarget?.annuler ? "Annuler le paiement" : "Valider le paiement"}
+        description={paiementTarget
+          ? paiementTarget.annuler
+            ? `Le paiement de ${paiementTarget.insc.prenom} ${paiementTarget.insc.nom} repassera « à payer ». Continuer ?`
+            : `Confirmer que ${paiementTarget.insc.prenom} ${paiementTarget.insc.nom} a payé ${formatFcfa(paiementTarget.insc.montant_du ?? 0)} ?`
+          : ""}
+        variant={paiementTarget?.annuler ? "destructive" : "default"}
+        confirmLabel={paiementTarget?.annuler ? "Annuler le paiement" : "Valider"}
+        loading={paiement.isPending}
+        onConfirm={() => paiementTarget && paiement.mutate(paiementTarget)}
+      />
 
       {/* ── Dialog refus individuel ── */}
       <Dialog open={!!rejectTarget} onOpenChange={(o) => { if (!o) { setRejectTarget(null); setSingleRejectMotif(""); } }}>

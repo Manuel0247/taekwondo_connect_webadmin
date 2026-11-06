@@ -15,6 +15,27 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+export const GRADES = [
+  { value: "blanc", label: "Blanc" },
+  { value: "jaune", label: "Jaune" },
+  { value: "orange", label: "Orange" },
+  { value: "vert", label: "Vert" },
+  { value: "bleu", label: "Bleu" },
+  { value: "rouge", label: "Rouge" },
+  { value: "noir", label: "Noir" },
+] as const;
+
+/** Grades ayant un tarif propre : ceintures de couleur, puis chaque dan (clé API « noir_2 ») */
+export const TARIF_GRADES: { key: string; grade: (typeof GRADES)[number]["value"]; dan?: number; label: string }[] = [
+  ...GRADES.filter((g) => g.value !== "noir").map((g) => ({ key: g.value, grade: g.value, label: `Ceinture ${g.label.toLowerCase()}` })),
+  ...Array.from({ length: 9 }, (_, i) => ({
+    key: `noir_${i + 1}`, grade: "noir" as const, dan: i + 1, label: `Noir ${i + 1}${i === 0 ? "er" : "e"} dan`,
+  })),
+];
+
+// Montant saisi : vide ou nombre positif (FCFA)
+const montant = z.string().optional().refine((v) => !v?.trim() || Number(v.replace(",", ".")) >= 0, "Montant invalide");
+
 const schema = z.object({
   titre: z.string().min(1, "Titre requis"),
   description: z.string().optional(),
@@ -25,6 +46,9 @@ const schema = z.object({
   places_total: z.number().int().min(1, "Minimum 1 place"),
   date_limite_inscription: z.string().optional(),
   statut: z.enum(["brouillon", "publie"]),
+  tarif_type: z.enum(["fixe", "variable"]),
+  prix: montant,
+  prix_par_grade: z.record(z.string(), montant).optional(),
 }).refine((d) => !d.date_debut || !d.date_fin || d.date_fin >= d.date_debut, {
   message: "La fin doit être après le début",
   path: ["date_fin"],
@@ -37,11 +61,32 @@ export function toDatetimeLocal(iso?: string | null): string {
   return iso ? iso.replace(" ", "T").slice(0, 16) : "";
 }
 
+const toMontant = (v?: string) => (v?.trim() ? Number(v.replace(",", ".")) : null);
+
+/** Tarif de l'API → valeurs du formulaire */
+export function toTarifForm(ev: { tarif_type?: string | null; prix?: number | null; prix_par_grade?: Record<string, number | null> | null }) {
+  return {
+    tarif_type: (ev.tarif_type === "variable" ? "variable" : "fixe") as EventFormData["tarif_type"],
+    prix: ev.prix != null ? String(ev.prix) : "",
+    prix_par_grade: Object.fromEntries(
+      Object.entries(ev.prix_par_grade ?? {}).map(([g, p]) => [g, p != null ? String(p) : ""]),
+    ),
+  };
+}
+
 /** Valeurs du formulaire → payload attendu par l'API ("YYYY-MM-DD HH:mm:ss"). */
 export function toEventPayload(data: EventFormData) {
   const toApi = (v: string) => v.replace("T", " ") + ":00";
+  const parGrade = Object.fromEntries(
+    Object.entries(data.prix_par_grade ?? {})
+      .map(([g, p]) => [g, toMontant(p)] as const)
+      .filter(([, p]) => p !== null),
+  );
   return {
     ...data,
+    // Seul le tarif choisi est conservé
+    prix: data.tarif_type === "fixe" ? toMontant(data.prix) : null,
+    prix_par_grade: data.tarif_type === "variable" && Object.keys(parGrade).length ? parGrade : null,
     description: data.description?.trim() || null,
     date_debut: toApi(data.date_debut),
     date_fin: toApi(data.date_fin),
@@ -71,11 +116,12 @@ export function EventForm({
     formState: { errors },
   } = useForm<EventFormData>({
     resolver: zodResolver(schema) as unknown as Resolver<EventFormData>,
-    defaultValues: { type: "competition", statut: "brouillon", ...defaultValues },
+    defaultValues: { type: "competition", statut: "brouillon", tarif_type: "fixe", prix: "", prix_par_grade: {}, ...defaultValues },
   });
 
   const type = watch("type");
   const statut = watch("statut");
+  const tarifType = watch("tarif_type");
 
   return (
     <form
@@ -111,7 +157,11 @@ export function EventForm({
           <Label className="text-white">Type</Label>
           <Select
             value={type}
-            onValueChange={(v) => setValue("type", v as EventFormData["type"])}
+            onValueChange={(v) => {
+              setValue("type", v as EventFormData["type"]);
+              // À la création, un passage de grade est payé selon le grade ; les autres à prix fixe
+              if (mode === "create") setValue("tarif_type", v === "passage_grade" ? "variable" : "fixe");
+            }}
             disabled={typeLocked}
           >
             <SelectTrigger className="bg-brand-black border-brand-border text-white">
@@ -186,6 +236,59 @@ export function EventForm({
           className="bg-brand-black border-brand-border text-white"
           {...register("date_limite_inscription")}
         />
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-brand-border p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <Label className="text-white">Participation</Label>
+          <Select value={tarifType} onValueChange={(v) => setValue("tarif_type", v as EventFormData["tarif_type"])}>
+            <SelectTrigger className="w-[220px] bg-brand-black border-brand-border text-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-brand-surface border-brand-border text-white">
+              <SelectItem value="fixe">Montant fixe</SelectItem>
+              <SelectItem value="variable">Variable selon le grade</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {tarifType === "fixe" ? (
+          <div className="space-y-2">
+            <div className="relative">
+              <Input
+                inputMode="decimal"
+                placeholder="Laisser vide si gratuit"
+                className="pr-16 bg-brand-black border-brand-border text-white placeholder:text-brand-muted"
+                {...register("prix")}
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-muted text-xs">FCFA</span>
+            </div>
+            {errors.prix && <p className="text-red-400 text-xs">{errors.prix.message}</p>}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-brand-muted text-xs">
+              Montant selon le grade actuel de l&apos;athlète. Laisser vide pour un grade non concerné.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {TARIF_GRADES.map((g) => (
+                <div key={g.key} className="space-y-1">
+                  <span className="text-brand-muted text-xs">{g.label}</span>
+                  <div className="relative">
+                    <Input
+                      inputMode="decimal"
+                      placeholder="—"
+                      className="pr-14 h-9 bg-brand-black border-brand-border text-white placeholder:text-brand-muted"
+                      {...register(`prix_par_grade.${g.key}`)}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-muted text-xs">FCFA</span>
+                  </div>
+                  {errors.prix_par_grade?.[g.key] && <p className="text-red-400 text-xs">Montant invalide</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <Button

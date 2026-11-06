@@ -8,7 +8,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EventForm, toDatetimeLocal, toEventPayload, type EventFormData } from "@/components/admin/EventForm";
+import { EventForm, toDatetimeLocal, toEventPayload, toTarifForm, type EventFormData } from "@/components/admin/EventForm";
 import api from "@/lib/api";
 
 export default function EditEventPage({ params }: { params: Promise<{ id: string }> }) {
@@ -72,6 +72,7 @@ export default function EditEventPage({ params }: { params: Promise<{ id: string
               date_fin: toDatetimeLocal(ev.date_fin),
               date_limite_inscription: toDatetimeLocal(ev.date_limite_inscription),
               statut: ev.statut === "publie" ? "publie" : "brouillon",
+              ...toTarifForm(ev),
             }}
             onSubmit={(data) => updateMutation.mutate(data)}
           />
