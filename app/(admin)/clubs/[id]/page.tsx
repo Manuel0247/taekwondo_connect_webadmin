@@ -7,7 +7,7 @@ import {
   ArrowLeft, MapPin, Users, Mail, Phone, Euro,
   CheckCircle2, XCircle, PauseCircle, FileText,
   Image as ImageIcon, Clock, Dumbbell, BookOpen,
-  CalendarCheck, AlertCircle, Loader2,
+  CalendarCheck, AlertCircle, Loader2, KeyRound,
 } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
@@ -22,6 +22,13 @@ import api from "@/lib/api";
 import { mediaUrl } from "@/lib/media";
 
 type ActionType = "validate" | "reject" | "suspend" | null;
+
+interface NewCreds {
+  identifiant: string;
+  mot_de_passe_provisoire: string;
+  email_envoye: boolean;
+  user: { prenom: string; email: string | null };
+}
 
 interface Horaire { jour?: string; ouverture?: string; fermeture?: string; [key: string]: string | undefined; }
 
@@ -56,6 +63,32 @@ export default function ClubDetailPage({ params }: { params: Promise<{ id: strin
     },
     onError: () => toast.error("Une erreur est survenue"),
   });
+
+  // Mot de passe perdu par le maître (compte sans email : pas de « mot de passe oublié » possible)
+  const [resetOpen, setResetOpen] = useState(false);
+  const [newCreds, setNewCreds] = useState<NewCreds | null>(null);
+  const resetMutation = useMutation({
+    mutationFn: async () => (await api.put(`/admin/clubs/${id}/maitre/password`)).data.data as NewCreds,
+    onSuccess: (creds) => {
+      setResetOpen(false);
+      setNewCreds(creds);
+      queryClient.invalidateQueries({ queryKey: ["club-detail", id] });
+    },
+    onError: () => toast.error("Réinitialisation impossible"),
+  });
+
+  const copyCreds = async () => {
+    if (!newCreds) return;
+    try {
+      await navigator.clipboard.writeText(
+        `Bonjour ${newCreds.user.prenom}, votre mot de passe LCC Taekwondo a été réinitialisé.\n` +
+          `Identifiant : ${newCreds.identifiant}\nMot de passe provisoire : ${newCreds.mot_de_passe_provisoire}`,
+      );
+      toast.success("Identifiants copiés");
+    } catch {
+      toast.error("Copie impossible, notez les identifiants à la main");
+    }
+  };
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -170,7 +203,17 @@ export default function ClubDetailPage({ params }: { params: Promise<{ id: strin
                   <div className="space-y-2">
                     <Row icon={Users} label="Nom" value={`${club.maitre_salle.prenom ?? ""} ${club.maitre_salle.nom ?? ""}`} />
                     {club.maitre_salle.email && <Row icon={Mail} label="Email" value={club.maitre_salle.email} />}
+                    {club.maitre_salle.identifiant && <Row icon={Users} label="Identifiant" value={club.maitre_salle.identifiant} />}
                     {club.maitre_salle.telephone && <Row icon={Phone} label="Tél." value={club.maitre_salle.telephone} />}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setResetOpen(true)}
+                      className="mt-2 border-brand-border bg-transparent text-white hover:bg-white/5"
+                    >
+                      <KeyRound className="size-4 mr-1.5" />
+                      Réinitialiser le mot de passe
+                    </Button>
                   </div>
                 ) : (
                   <p className="text-brand-muted text-sm">Non renseigné</p>
@@ -377,6 +420,41 @@ export default function ClubDetailPage({ params }: { params: Promise<{ id: strin
             />
           </div>
         )}
+      </ConfirmDialog>
+
+      {/* Réinitialisation du mot de passe du maître */}
+      <ConfirmDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        title="Réinitialiser le mot de passe"
+        description={`Un nouveau mot de passe provisoire sera généré pour ${club?.maitre_salle?.prenom ?? ""} ${club?.maitre_salle?.nom ?? ""}. L'ancien ne fonctionnera plus et ses sessions ouvertes seront fermées.`}
+        confirmLabel="Réinitialiser"
+        loading={resetMutation.isPending}
+        onConfirm={() => resetMutation.mutate()}
+      />
+      <ConfirmDialog
+        open={!!newCreds}
+        onOpenChange={(open) => { if (!open) setNewCreds(null); }}
+        title="Nouveau mot de passe"
+        description={
+          newCreds?.email_envoye
+            ? `Envoyé à ${newCreds.user.email}. Notez-le aussi au cas où.`
+            : "Transmettez ces identifiants au maître de salle : ils ne seront plus affichés ensuite."
+        }
+        confirmLabel="Copier"
+        cancelLabel="Fermer"
+        onConfirm={copyCreds}
+      >
+        <dl className="rounded-lg border border-brand-border bg-brand-black p-4 space-y-3">
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-brand-muted">Identifiant</dt>
+            <dd className="font-mono text-lg font-bold text-white select-all">{newCreds?.identifiant}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-brand-muted">Mot de passe provisoire</dt>
+            <dd className="font-mono text-lg font-bold text-white select-all">{newCreds?.mot_de_passe_provisoire}</dd>
+          </div>
+        </dl>
       </ConfirmDialog>
     </div>
   );

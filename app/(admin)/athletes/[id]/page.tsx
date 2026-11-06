@@ -21,7 +21,7 @@ export default function AthleteDetailPage({ params }: { params: Promise<{ id: st
         ...raw,
         prenom:         raw.prenom         ?? u.prenom         ?? "",
         nom:            raw.nom            ?? u.nom            ?? "",
-        email:          raw.email          ?? u.email          ?? "",
+        email:          raw.email          ?? u.email          ?? u.identifiant    ?? "",
         date_naissance: raw.date_naissance ?? u.date_naissance ?? null,
         sexe:           raw.sexe           ?? u.sexe           ?? null,
       };

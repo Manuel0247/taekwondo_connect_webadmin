@@ -15,7 +15,9 @@ import api from "@/lib/api";
 
 interface SpatiRole { name: string }
 interface User {
-  id: string; prenom: string; nom: string; email: string;
+  id: string; prenom: string; nom: string;
+  email: string | null;          // facultatif pour les comptes créés par un maître ou l'admin
+  identifiant?: string | null;
   role?: string;          // set via setAttribute in AuthService
   roles?: SpatiRole[];    // Spatie permission eager-loaded array
   created_at: string;
@@ -52,7 +54,7 @@ export default function UsersPage() {
 
   const filtered = (users ?? []).filter((u) => {
     const q = search.toLowerCase();
-    return u.nom.toLowerCase().includes(q) || u.prenom.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
+    return u.nom.toLowerCase().includes(q) || u.prenom.toLowerCase().includes(q) || (u.email ?? "").toLowerCase().includes(q) || (u.identifiant ?? "").toLowerCase().includes(q);
   });
 
   return (
@@ -95,7 +97,7 @@ export default function UsersPage() {
                             <span className="text-white text-sm font-medium">{u.prenom} {u.nom}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-3 text-brand-muted text-sm">{u.email}</td>
+                        <td className="px-5 py-3 text-brand-muted text-sm">{u.email ?? u.identifiant}</td>
                         <td className="px-5 py-3">
                           <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border", r.className)}>{r.label}</span>
                         </td>

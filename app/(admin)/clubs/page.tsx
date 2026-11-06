@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, PauseCircle, PlayCircle, Search, Filter, Eye } from "lucide-react";
+import { CheckCircle2, XCircle, PauseCircle, PlayCircle, Search, Filter, Eye, Plus } from "lucide-react";
 import Link from "next/link";
 import { TopBar } from "@/components/admin/TopBar";
 import { ClubStatusBadge } from "@/components/admin/ClubStatusBadge";
@@ -131,6 +131,11 @@ export default function ClubsPage() {
               </SelectContent>
             </Select>
           </div>
+          <Link href="/clubs/new" className="ml-auto">
+            <Button className="bg-brand-orange hover:bg-brand-orange-light text-white">
+              <Plus className="size-4 mr-1.5" />Nouveau club
+            </Button>
+          </Link>
         </div>
 
         {/* Table */}

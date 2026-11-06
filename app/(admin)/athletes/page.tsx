@@ -29,7 +29,7 @@ function normalize(raw: any): Athlete {
     id:              raw.id,
     prenom:          raw.prenom          ?? u.prenom          ?? "",
     nom:             raw.nom             ?? u.nom             ?? "",
-    email:           raw.email           ?? u.email           ?? "",
+    email:           raw.email           ?? u.email           ?? u.identifiant     ?? "",
     grade:           raw.grade           ?? undefined,
     club:            raw.club            ?? undefined,
     date_naissance:  raw.date_naissance  ?? u.date_naissance  ?? undefined,
