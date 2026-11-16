@@ -109,7 +109,9 @@ Détails d'un club avec son maître de salle.
 Liste des clubs en attente de validation.
 
 ### GET `/clubs/me` 🔒 `maitre_salle`
-Mon club.
+Mon club (club actif).
+
+> **Plusieurs clubs par maître** : toutes les routes authentifiées acceptent l'en-tête `X-Club-Id`. Pour un maître de salle, il désigne le club concerné par les routes `/clubs/me/*`, `/events/{id}/inscriptions`, etc. Sans en-tête, ou avec un club qui ne lui appartient pas : son premier club (le plus ancien). `GET /users/me` et la connexion renvoient `clubs` (tous ses clubs) en plus de `club` (club actif).
 
 ### PUT `/clubs/me` 🔒 `maitre_salle`
 Modifier les infos du club (description, adresse, prix…).
@@ -128,6 +130,17 @@ Modifier les infos du club (description, adresse, prix…).
 ```json
 { "horaires": { "lundi": "17h-19h", "samedi": "09h-12h" } }
 ```
+
+### POST `/admin/clubs` 🔒 `admin`
+Crée un club validé d'emblée. Maître de salle : **soit** `maitre` (nouveau compte), **soit** `maitre_id` (maître existant, qui gère alors un club de plus).
+```json
+{ "nom": "Dojang Angré", "adresse": "Bd Latrille", "ville": "Cocody", "latitude": 5.39, "longitude": -3.98,
+  "maitre": { "prenom": "Awa", "nom": "Yao", "email": null, "telephone": null } }
+```
+ou `"maitre_id": "<uuid>"` à la place de `maitre`. Réponse : `{ user, club, identifiant, mot_de_passe_provisoire, email_envoye, maitre_existant }`. Avec un maître existant, pas de nouveau mot de passe (`mot_de_passe_provisoire: null`). Il reçoit une notification « Nouveau club » et un email s'il en a un.
+
+### GET `/admin/maitres?q=` 🔒 `admin`
+Recherche des maîtres de salle (nom, prénom, email, téléphone ; chaque mot doit correspondre), avec leurs `clubs`. 20 résultats par défaut, `limit` au maximum 50.
 
 ### PUT `/admin/clubs/{uuid}/validate` 🔒 `admin`
 ### PUT `/admin/clubs/{uuid}/reject` 🔒 `admin`
