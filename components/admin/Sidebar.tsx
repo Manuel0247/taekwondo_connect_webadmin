@@ -15,7 +15,9 @@ import {
   Bell,
   UserCog,
   LogOut,
+  ShoppingBag,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { clearAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
@@ -28,6 +30,7 @@ const navItems = [
   { href: "/techniques", label: "Techniques", icon: BookOpen },
   { href: "/badges", label: "Badges", icon: Award },
   { href: "/rankings", label: "Classements", icon: BarChart3 },
+  { href: "/boutique", label: "Boutique", icon: ShoppingBag },
   { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/users", label: "Utilisateurs", icon: UserCog },
 ];
@@ -39,6 +42,12 @@ interface SidebarProps {
 export function Sidebar({ pendingClubs = 0 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  // Commandes en attente : pastille sur « Boutique », relue chaque minute
+  const { data: pendingOrders = 0 } = useQuery({
+    queryKey: ["orders-pending-count"],
+    queryFn: async () => (await api.get("/admin/orders/pending-count")).data.data.count as number,
+    refetchInterval: 60_000,
+  });
 
   const handleLogout = async () => {
     try {
@@ -84,6 +93,11 @@ export function Sidebar({ pendingClubs = 0 }: SidebarProps) {
             >
               <Icon className="size-4 shrink-0" />
               <span className="flex-1">{label}</span>
+              {href === "/boutique" && pendingOrders > 0 && (
+                <span className="bg-brand-orange text-white text-xs rounded-full px-1.5 py-0.5 min-w-[20px] text-center leading-none" aria-label={`${pendingOrders} commande(s) en attente`}>
+                  {pendingOrders}
+                </span>
+              )}
               {href === "/clubs" && pendingClubs > 0 && (
                 <span className="bg-brand-orange text-white text-xs rounded-full px-1.5 py-0.5 min-w-[20px] text-center leading-none">
                   {pendingClubs}

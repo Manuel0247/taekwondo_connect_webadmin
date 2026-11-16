@@ -442,6 +442,39 @@ Stats globales (users, clubs, events, courses).
 
 ---
 
+## 14. Boutique
+
+Catalogue géré par l'admin ; athlètes et maîtres de salle commandent. Paiement et livraison hors de l'app : l'admin suit le statut.
+
+### GET `/shop/categories` — public
+Catégories avec `products_count` (produits en vente).
+
+### GET `/shop/products?category_id=&q=` — public
+Produits en vente (`actif = true`), disponibles d'abord. Produit : `{ id, nom, description, prix, images[], tailles[] | null, disponible, category }`. `tailles` vide = taille unique ; `disponible = false` = épuisé (visible, non commandable).
+
+### GET `/shop/products/{uuid}` — public
+
+### POST `/orders` 🔒 `athlete`, `maitre_salle`
+```json
+{ "items": [{ "product_id": "<uuid>", "quantite": 2, "taille": "120" }], "telephone": "0707070707", "commentaire": "À récupérer au club" }
+```
+Les prix viennent de la base et sont copiés dans la commande (nom, photo, prix unitaire). Les lignes identiques (produit + taille) sont fusionnées. Taille obligatoire si le produit en propose, ignorée sinon. Refus (422) si un produit est épuisé ou retiré. Numéro `CMD-AAAA-NNNNN`. Les admins reçoivent une notification `commande` et un email.
+
+### GET `/orders/me` · GET `/orders/{uuid}` 🔒 `athlete`, `maitre_salle`
+Mes commandes avec `items`. Statuts : `en_attente` → `confirmee` → `livree`, ou `annulee`.
+
+### PUT `/orders/{uuid}/cancel` 🔒 `athlete`, `maitre_salle`
+Annulation par le client, seulement `en_attente` (sinon 422). Les admins sont prévenus.
+
+### Admin 🔒 `admin`
+- `POST /admin/shop/categories` `{ nom, ordre? }` · `PUT /admin/shop/categories/{uuid}` · `DELETE /admin/shop/categories/{uuid}` (les produits restent, sans catégorie)
+- `GET /admin/shop/products` (masqués compris) · `POST /admin/shop/products` `{ nom, prix, category_id?, description?, tailles?: string[], disponible?, actif?, images?: string[] }` · `PUT /admin/shop/products/{uuid}` · `DELETE /admin/shop/products/{uuid}`
+- Photos : `POST /uploads/image` avec `model=produit`, `collection=images` → ajoutée à la fin de `images` ; réordonner / retirer avec `PUT` `{ images }`.
+- `GET /admin/orders?statut=&q=` (numéro ou nom du client) · `GET /admin/orders/{uuid}` (client avec rôle et club) · `GET /admin/orders/pending-count`
+- `PUT /admin/orders/{uuid}/statut` `{ statut: "confirmee" | "livree" | "annulee", motif? }` : `en_attente` → confirmée, livrée ou annulée ; `confirmee` → livrée ou annulée ; livrée et annulée sont définitives. Le client est notifié.
+
+---
+
 ## Comptes de test (après `php artisan migrate:fresh --seed`)
 
 | Email | Mot de passe | Rôle |
